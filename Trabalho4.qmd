@@ -1,0 +1,246 @@
+---
+title: "Identificação de fatores genéticos que medeiam o desenvolvimento da síndrome de evitação a sombra (SAS) em resposta a disponibilidade de nitrogênio em Arabidopsis thaliana"
+subtitle: "Laboratório de Estatística I - UFMG"
+author: "Salvador Alves Ferreira Netto (2022040141)
+        Nicolas Adam Berger Monteiro (2022039950)
+        Marcelo Pinheiro do Amaral Filho (2020042686)
+        Marcello França Magni (2022079498)"
+#abstract: ""
+#date: "25/10/2024"
+lang: pt
+format: 
+  pdf:
+    #toc-title: "Summary"
+    #toc-location: right
+    fontsize: 12pt
+    linestretch: 1.5
+    toc: false
+    toc-depth: 3
+    number-sections: false
+    number-depth: 3
+    documentclass: report
+    fig-cap-location: bottom
+    fig-pos: 'H'
+    geometry:
+      top=3cm
+      left=3cm
+      right=2cm
+      bottom=2cm
+execute:
+  echo: false
+  warning: false
+  output: false
+---
+
+
+```{r}
+#| output: false
+#| echo: false
+
+library(dplyr)
+library(tidyverse)
+library(lmtest)
+library(forecast)
+```
+
+```{r}
+#| output: false
+#| echo: false
+#| 
+
+dados = read_csv("airline-passengers.csv")
+
+dados <-  dados[,2]
+```
+
+# Descrição dos Dados
+
+• Faça uma descrição dos dados. Qual série temporal foi escolhida? Como os 
+dados foram obtidos? 
+
+Série Temporal Escolhida: A série temporal "Airline Passengers" consiste no número mensal de passageiros transportados por uma companhia aérea internacional.
+Fonte dos Dados: Este conjunto de dados é baseado em registros históricos amplamente usados em estudos acadêmicos e exemplos de livros, como o "Time Series Analysis" de Box e Jenkins.
+Período de Coleta: A série cobre de janeiro de 1949 a dezembro de 1960, totalizando 144 observações mensais.
+Formato dos Dados:
+Coluna Month: Representa o mês de cada observação no formato YYYY-MM.
+Coluna Passengers: Contém o número de passageiros transportados (em milhares).
+
+
+• Retire as últimas 6 ou 12 observações (conjunto teste) para fins de comparação 
+de previsões. Os dados restantes (conjunto treinamento) serão utilizados para o 
+ajuste dos modelos. 
+
+
+
+
+```{r}
+#| echo: true
+
+teste <- dados[133:144,]
+treino <- dados[1:132,]
+```
+
+• Faça um gráfico da série e comente.
+
+
+```{r}
+treino = ts(treino,
+          start=1949,
+          frequency=12) 
+```
+
+
+```{r}
+plot(treino)
+```
+
+A série apresenta de forma evidente uma sazonalizade anual e uma tendência crescente.
+
+
+# Ajuste Modelos
+
+## ARIMA
+
+```{r}
+acf(treino, lag.max = 60) 
+pacf(treino, lag.max = 60)
+```
+
+
+
+```{r}
+diff_treino <-  diff(treino)
+```
+
+```{r}
+acf(diff_treino, lag.max = 60) 
+pacf(diff_treino, lag.max = 60)
+```
+
+```{r}
+m1 = arima(treino,
+           order = c(0, 1, 1),
+           seasonal = list(order = c(0, 1, 1)))
+m1
+coeftest(m1)
+```
+
+Escolhemos o modelo com diferenciação e MA(1) porque a série apresenta um pico siginificativo no lag 1 do ACF e decrescimento exponencial no PACF. Já para a diferenciação foi necessário realiza-lá, pois a série não parecia estacionária. No caso da sazonalidade escolhemos uma MA(1), pois a cada 12 meses tem picos significativos no ACF, e a diferenciação foi necessária pois a parte sazonal não parecia estacionária.
+
+```{r}
+m2 = arima(treino,
+           order = c(0, 1, 1),
+           seasonal = list(order = c(0, 1, 0)))
+m2
+coeftest(m2)
+```
+```{r}
+m3 = arima(treino,
+           order = c(1, 1, 1),
+           seasonal = list(order = c(1, 1, 1)))
+m3
+coeftest(m3)
+```
+
+```{r}
+m4 = arima(treino,
+           order = c(0, 1, 1),
+           seasonal = list(order = c(1, 1, 1)))
+m4
+coeftest(m4)
+```
+
+```{r}
+m5 = arima(treino,
+           order = c(0, 1, 1),
+           seasonal = list(order = c(0, 0, 1)))
+m5
+coeftest(m5)
+```
+
+```{r}
+res = m2$res
+shapiro.test(res)
+hist(res)
+```
+
+```{r}
+acf(res, lag.max = 60)
+pacf(res, lag.max = 60)
+```
+
+
+```{r}
+k = c(21,23)
+
+for (i in k){
+  box_teste = Box.test(res, lag = i, type = c('Box-Pierce', 'Ljung-Box'), fitdf = 0)
+  print(teste)
+}
+
+```
+
+## Alisamento Exponencial
+
+
+```{r}
+serie_aehw <- HoltWinters(treino, seasonal = c("multiplicative"))
+
+serie_aehw$fit
+```
+
+
+```{r}
+alfa=serie_aehw$alpha
+beta=serie_aehw$beta
+gama=serie_aehw$gamma
+
+print(alfa)
+print(beta)
+print(gama)
+```
+
+
+```{r}
+plot(serie_aehw, lwd=2, col="black", xlab="Ano", ylab=NA)
+
+```
+
+# Comparação de modelos 
+
+```{r}
+previsao_aehw = predict(serie_aehw, n.ahead=12, prediction.interval = TRUE, level = 0.95, interval="prediction") 
+
+plot(serie_aehw, previsao_aehw, lwd=2, col="black", xlab="Ano", ylab=NA)
+
+```
+```{r}
+predict_aewh <- as.data.frame(previsao_aehw)
+
+diff_real_aewh = (predict_aewh$fit - teste)^2
+
+eqmp_aehw <-  mean(diff_real_aewh$total_passengers)
+
+sqrt(eqmp_aehw)
+```
+
+```{r}
+previsao_arima <- forecast(m2, h = 12)
+plot(previsao_arima)
+```
+
+
+```{r}
+previsao_arima <- as.data.frame(previsao_arima$mean)
+```
+
+
+
+```{r}
+diff_real_arima = (previsao_arima - teste)^2
+
+eqmp_arima <-  mean(diff_real_arima$x)
+
+sqrt(eqmp_arima)
+```
+
