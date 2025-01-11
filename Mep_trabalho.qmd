@@ -1,0 +1,30 @@
+---
+title: "Séries temporais"
+format: html
+editor: visual
+---
+
+```{r}
+dados = read.csv('airline-passengers.csv')
+
+dados
+```
+
+
+
+```{r}
+dados$month <- as.Date(paste(dados$month, "01", sep = "-"), format = "%Y-%m-%d")
+
+
+ggplot(dados, aes(x = month, y = total_passengers)) +
+  geom_line(color = "blue") +  # Linha azul para o gráfico
+  labs(title = "Série Temporal de Passageiros ao Longo dos Meses",
+       x = "Mês",
+       y = "Total de Passageiros") +
+  theme_minimal() +  # Usar um tema minimalista
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
+
