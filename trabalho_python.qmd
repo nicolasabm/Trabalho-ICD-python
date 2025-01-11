@@ -42,6 +42,19 @@ from statsmodels.stats.stattools import durbin_watson
 from statsmodels.graphics import utils
 from statsmodels.compat.python import lzip
 from scipy import stats
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import silhouette_samples
+
+import matplotlib.dates as mdates
+import plotly.express as px
+import plotly.graph_objects as go
+from mpl_toolkits.mplot3d import Axes3D
+
 ```
 
 ```{r}
@@ -68,8 +81,160 @@ data['year'] = data['year'].astype(str)
 
 
 
+```{python}
+data['island'].nunique()
+```
 
-# Introdução
+
+```{python}
+g20 = sns.boxplot(x='island', y='bill_length_mm',data=data)
+plt.title("Distribuição do Comprimento do Bico por Ilha")
+plt.xlabel("Ilha")
+plt.ylabel("Comprimento do Bico (mm)")
+plt.show()
+```
+
+
+
+
+# Possibilidade de cluster
+
+
+```{python funcao ajuste cluster}
+
+def escolha_num_cluster(df: pd.DataFrame, qtd_cluster: int ,var1: str, var2: str, var3: str = None, var4 : str = None, var5 : str = None,var6 : str = None,var7 : str = None,var8 : str = None,var9 : str = None,var10 : str = None):
+   
+  
+    if qtd_cluster <= 1:
+        raise ValueError("qtd_cluster deve ser maior que 1")
+   
+    # Selecionando variáveis fornecidas
+    vars = [var1, var2, var3, var4, var5,var6,var7,var8,var9,var10]
+    vars = [v for v in vars if v is not None]
+ 
+ 
+    #Padronizando variáveis
+    cluster = df
+    #cluster = df[[var1,var2,var3, var4]]
+    cluster = df[vars]
+    scaler = StandardScaler()
+    cluster_padron = scaler.fit_transform(cluster)
+ 
+    # Melhor quantidade de clusters
+    kmeans_kwargs = {
+        "init": "random",
+        "n_init": 10,
+        "max_iter": 300,
+        "random_state": 42,
+    }
+    sse = []
+    for k in range(1,qtd_cluster):
+        kmeans = KMeans(n_clusters = k, **kmeans_kwargs)
+        kmeans.fit(cluster_padron)
+        sse.append(kmeans.inertia_)    
+ 
+    silhouette_coefficients = []
+    for k2 in range(2,qtd_cluster):
+        kmeans = KMeans(n_clusters = k2, **kmeans_kwargs)
+        kmeans.fit(cluster_padron)
+        score = silhouette_score(cluster_padron, kmeans.labels_)
+        silhouette_coefficients.append(score)
+   
+    #Cotovelo
+    plt.style.use("fivethirtyeight")
+    plt.plot(range(1, qtd_cluster), sse, marker = 'o')
+    plt.xticks(range(1, qtd_cluster))
+    plt.xlabel("Number of Clusters")
+    plt.ylabel("SSE")
+    plt.title('Número de clusters')
+    plt.show()
+   
+    #Calculo de silhueta
+    plt.style.use("fivethirtyeight")
+    plt.plot(range(2, qtd_cluster), silhouette_coefficients, marker = 'o')
+    plt.xticks(range(2, qtd_cluster))
+    plt.xlabel("Number of Clusters")
+    plt.ylabel("Silhouette Coefficient")
+    plt.title('Coeficiente de Silhueta')
+    plt.show()
+ 
+    return cluster_padron,scaler
+ 
+ 
+ 
+def ajuste_cluster(padronizado, num_clusters: int):
+    #Ajuste ao modelo kMenas
+    kmeans = KMeans(
+        init = 'random',
+        n_clusters = num_clusters,
+        n_init = 10,
+        max_iter = 300,
+        random_state = 42
+    )
+   
+    kmeans.fit(padronizado)
+   
+    #Verificação de inter-cluster
+    #pega os indices dos clusters
+    cluster_indice = kmeans.labels_
+    #Calculo de silhueta pra cada i
+    silhueta_score = silhouette_samples(padronizado, cluster_indice)
+ 
+    score_geral = np.mean(silhueta_score)
+    #Matriz de 0 que vai receber a quantidade de pontos em cada cluster na fronteira que não      estão bem definidos
+    qtd_cluster_fronteira = np.zeros(kmeans.n_clusters)
+    #Vai preencher a matrzi de 0 com a quantidade de pontos na fronteira de cada cluster
+    for i in range(kmeans.n_clusters):
+        cluster_inidice_i = np.where(cluster_indice == i)[0]
+        count_fronteira = np.sum((silhueta_score[cluster_inidice_i] > -0.1) &      (silhueta_score[cluster_inidice_i] < 0.1))
+        qtd_cluster_fronteira[i] = count_fronteira
+ 
+    total_cluster = np.bincount(cluster_indice)
+    porcentagem = (qtd_cluster_fronteira/total_cluster) * 100
+    #indice é uma variável definida dentro do for que pega o indice da minha array, e valor e     a variavel que pega o valor dentro da array
+    for indice, valor in enumerate(porcentagem):
+        print(f"\n{indice}: {valor: .2f}% dos pontos na fornteira")
+ 
+    print(f"\nPontuação do coeficiente de silhueta geral: {score_geral: .2f}")
+ 
+    return kmeans
+```
+
+
+
+```{python}
+padron, scaler = escolha_num_cluster(data,20,'bill_length_mm','bill_depth_mm','flipper_length_mm')
+```
+
+
+```{python}
+kmeans = ajuste_cluster(padron,3)
+```
+
+
+```{python}
+scaler.inverse_transform(kmeans.cluster_centers_)
+```
+
+
+```{python}
+data['classificacao'] = kmeans.labels_
+
+```
+
+
+```{python}
+fig = px.scatter_3d(data, x='bill_length_mm', y='bill_depth_mm', z='flipper_length_mm',
+                    color='classificacao', title='Cluster',color_discrete_map={0: 'blue', 1: 'green', 2: 'red'})
+fig.update_traces(marker=dict(size=4))
+# Exibe o gráfico
+fig.show()
+```
+
+
+# Análise de Regressão
+
+## Motivação
 
 Neste estudo, exploraremos a relação entre a massa corporal em gramas (`body_mass_g`) de pinguins e diversas variáveis específicas, utilizando análise de regressão linear em Python. As variáveis numéricas incluem o comprimento do bico em milímetros (`bill_length_mm`), o diâmetro do bico em milímetros (`bill_diameter_mm`) e o comprimento da nadadeira em milímetros (`flipper_length_mm`). Além disso, temos variáveis categóricas, como espécie (`species`), sexo (`sex`), ilha (`island`), e ano (`year`). O banco de dados contém 333 linhas e 8 colunas;
 
@@ -104,7 +269,7 @@ tabela_describe
 ```
 
 
-# Análise de Regressão
+
 
 ## Seleção de Variáveis
 
