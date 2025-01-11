@@ -219,7 +219,6 @@ scaler.inverse_transform(kmeans.cluster_centers_)
 
 ```{python}
 data['classificacao'] = kmeans.labels_
-
 ```
 
 
