@@ -1,0 +1,437 @@
+---
+title: "Análise do Banco de Dados De Penguins do Arquipélago Palmer"
+author:
+  - Salvador Alves Ferreira Netto (2022040141)
+  - Caique Izidoro Alvarenga (2021086814)
+  - Nicolas Adam Berger Monteiro (2022039950)
+  - Marcelo Pinheiro Filho (2020042686)
+abstract: ""
+lang: pt
+format: 
+  pdf:
+    toc: true
+    fig-pos: "H"
+    #toc-title: "Summary"
+    toc-depth: 3
+    #toc-location: right
+    number-sections: true
+    number-depth: 3
+    documentclass: report
+    fig-cap-location: top
+    geometry:
+      - top=3cm
+      - left=3cm
+      - right=2cm
+      - bottom=2cm
+execute:
+  echo: false
+  warning: false
+  output: false
+---
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.stattools import durbin_watson
+from statsmodels.graphics import utils
+from statsmodels.compat.python import lzip
+from scipy import stats
+```
+
+```{r}
+library(tinytex)
+library(palmerpenguins)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(reticulate)
+library(car)
+data = penguins
+```
+
+```{r}
+write.csv(data, "data.csv", row.names = FALSE) 
+```
+
+
+```{python}
+data = pd.read_csv("data.csv")
+data = data.dropna()
+data['year'] = data['year'].astype(str)
+```
+
+
+
+
+# Introdução
+
+Neste estudo, exploraremos a relação entre a massa corporal em gramas (`body_mass_g`) de pinguins e diversas variáveis específicas, utilizando análise de regressão linear em Python. As variáveis numéricas incluem o comprimento do bico em milímetros (`bill_length_mm`), o diâmetro do bico em milímetros (`bill_diameter_mm`) e o comprimento da nadadeira em milímetros (`flipper_length_mm`). Além disso, temos variáveis categóricas, como espécie (`species`), sexo (`sex`), ilha (`island`), e ano (`year`). O banco de dados contém 333 linhas e 8 colunas;
+
+
+```{python tabela-head}
+#| output: true
+#| label: tbl-head
+#| tbl-cap: "Visualização das 5 Primeiras Linhas do Banco de Dados"
+
+tabela_head = data.head().style.set_caption("Head dos Dados") \
+                          .set_table_styles([
+                              {"selector": "caption",
+                               "props": [("font-weight", "bold"), ("font-size", "16px")]}
+                          ])
+                          
+tabela_head
+```
+
+```{python tabela-describe}
+#| output: true
+#| label: tbl-describe
+#| tbl-cap: "Sumário do Banco de Dados"
+
+tabela_describe = data.describe().style.set_caption("Sumário do Banco de Dados") \
+                          .set_table_styles([
+                              {"selector": "caption",
+                               "props": [("font-weight", "bold"), ("font-size", "16px")]}
+                          ])
+                          
+tabela_describe
+
+```
+
+
+# Análise de Regressão
+
+## Seleção de Variáveis
+
+```{python grafico-pairplot}
+#| output: true
+#| label: fig-pairplot
+#| fig-cap: "Relações em Pares por Especies"
+#| fig-pos: "H"
+#| layout-ncol: 2
+#| fig-subcap: 
+#|    - "Species"
+#|    - "Sex"
+#|    - "Island"
+#|    - "Year"
+
+g1 = sns.pairplot(data, hue="species", height= 1.5, diag_kind="hist")
+plt.show()
+
+g2 = sns.pairplot(data, hue="sex", height= 1.5, diag_kind="hist")
+plt.show()
+
+g3 = sns.pairplot(data, hue="island", height= 1.5, diag_kind="hist")
+plt.show()
+
+g4 = sns.pairplot(data, hue="year", height= 1.5, diag_kind="hist")
+plt.show()
+```
+
+O modelo de regressão linear múltipla inicial julgado como mais adequado foi:
+
+***body_mass_g \~ bill_depth_mm + flipper_length_mm + bill_length_mm + sex\*species***
+
+Ao observarmos a @fig-pairplot, é evidente que as três variáveis numéricas (`bill_depth_mm`, `flipper_length_mm` e `bill_length_mm`) apresentam uma correlação linear positiva com a variável de resposta `body_mass_g.` No entanto, as variáveis categóricas, como espécie e sexo, influenciam a forma como os coeficientes impactam a estimativa de *y*. Isso é evidenciado pelo fato de que, ao separar os dados por espécie ou sexo, observamos a formação de retas paralelas com interceptos diferentes.
+
+Além disso, é intuitivo considerar que o sexo tem um efeito sobre o peso corporal do pinguim, dado que, na maioria das espécies, os machos tendem a ser mais pesados do que as fêmeas. Também, as diferenças físicas entre as espécies podem contribuir para variações no peso.
+
+A variável `year` foi excluída do modelo devido à suposição de independência e distribuição igual entre os anos, corroborada pela observação gráfica de uma dispersão uniforme nos dados ao longo dos anos.
+
+
+```{python tabela-groupby_species}
+#| output: true
+#| label: tbl-groupby_species
+#| tbl-cap: "Quantidade de Espécies por Ilha"
+
+groupby_species = data.groupby(['species'])['island'].value_counts().reset_index()
+
+tabela_groupby_species = groupby_species.style.set_caption("Quantidade de Espécies por Ilha") \
+                          .set_table_styles([
+                              {"selector": "caption",
+                               "props": [("font-weight", "bold"), ("font-size", "16px")]}
+                          ])
+                          
+tabela_groupby_species
+```
+
+Quanto à variável categórica `island`, sua exclusão é justificada pela observação na tabela agrupada por espécie (@tbl-groupby_species). Nota-se que as espécies *Gentoo* e *Chinstrap* estão presentes exclusivamente em uma ilha cada, enquanto a espécie *Adelie* está praticamente distribuída de maneira equitativa nas três ilhas.
+
+```{python grafico-adelie}
+#| output: true
+#| label: fig-adele
+#| fig-cap: "Pinguins da Espécie Adelie Disposto por Ilha"
+#| fig-pos: "H"
+
+adelie = data[data['species']=='Adelie']
+g5 = sns.pairplot(adelie, hue="island", height= 1.5, diag_kind="hist")
+plt.show()
+```
+
+Ao analisarmos a @fig-adele, podemos visualizar que o comportamento da espécie *Adelie* é consistente em todas as três ilhas. Concluímos, portanto, que o fator ilha não modifica o comportamento da espécie *Adelie*.
+
+Dado que as ilhas *Dream* e *Biscoe* contêm exclusivamente as espécies *Chinstrap* e *Gentoo*, respectivamente, enquanto a espécie *Adelie* está igualmente distribuída entre as três ilhas, concluímos que não há variação significativa nos pinguins *Adelie* entre as diferentes ilhas. Diante desse cenário, parece mais viável escolher somente a variável `species` para inclusão no modelo. Essa decisão é respaldada por motivos biológicos e também porque apenas uma espécie está presente em diversas ilhas.
+
+```{python grafico-heatmap}
+#| output: true
+#| label: fig-heatmap
+#| fig-pos: "H"
+#| fig-cap: "Correlações entre as Variáveis do Conjunto de Dados"
+
+cor = data[['bill_length_mm','bill_depth_mm','flipper_length_mm','body_mass_g']].corr()
+
+fig, ax = plt.subplots(figsize= (12, 10))
+sns.heatmap(cor, annot= True, vmin= -1, vmax= 1, linewidth=.5, cmap='vlag', ax= ax)
+plt.xticks(rotation=45)
+plt.yticks(rotation=0)
+plt.show()
+```
+
+Temos correlações positivas entre as variáveis `flipper_length_mm` e `bill_length_mm`, bem como uma correlação negativa entre `bill_length_mm` e `bill_depth_mm`. Essa situação pode indicar a presença de alguns problemas de multicolinearidade.
+
+## Ajuste do Modelo e Multicolinearidade
+
+Utilizamos o procedimento *stepwise* para verificar diferentes modelos que continham interação entre `species`, `sex`, e as variáveis numéricas. No entanto, sempre enfrentávamos problemas com multicolinearidade. Para simplificar o modelo, optamos pela fórmula: ***body_mass_g ~ flipper_length_mm + bill_depth_mm + bill_length_mm + sex + species***. Entre todos os modelos avaliados, aqueles que apresentavam resíduos bem comportados e nenhum problema de influência, este se mostrou o único com todas as variáveis significativas, conforme testado pelo teste de coeficiente de regressão individual.
+
+```{python}
+#| output: true
+
+modelo = smf.ols(
+  formula= 'body_mass_g ~ flipper_length_mm + bill_depth_mm + bill_length_mm + sex + species',
+  data= data
+  ).fit()
+
+print(modelo.summary())
+```
+
+```{r}
+#| output: true
+#| echo: true
+
+modelo = lm(body_mass_g ~ flipper_length_mm + bill_depth_mm + bill_length_mm + sex + species, data= data)
+vif(modelo)
+```
+
+
+```{python}
+#| output: true
+#| echo: true
+
+modelo.bse
+```
+
+Não identificamos indícios de multicolinearidade, visto que os valores de *VIF* estão abaixo de 3.
+
+## Resíduos
+
+```{python}
+residuals = modelo.resid 
+fitted_value = modelo.fittedvalues 
+stand_resids = modelo.resid_pearson 
+influence = modelo.get_influence() 
+leverage = influence.hat_matrix_diag 
+p = modelo.model.exog.shape[1]
+n = modelo.model.exog.shape[0]
+```
+
+```{python grafico-residuos}
+#| output: true
+#| label: fig-residuos
+#| fig-pos: "H"
+#| fig-cap: "Análise Gráfica dos Resíduos"
+
+fig, ax = plt.subplots(nrows=2, ncols=2, figsize= (10, 8)) 
+  
+# Residual vs Fitted Plot 
+sns.residplot(x=fitted_value, y=residuals, ax=ax[0, 0], lowess= True) 
+ax[0, 0].axhline(y=0, color='grey', linestyle='dashed') 
+ax[0, 0].set_xlabel('Fitted Values') 
+ax[0, 0].set_ylabel('Residuals') 
+ax[0, 0].set_title('Residuals vs Fitted Fitted') 
+  
+# Normal Q-Q plot 
+sm.qqplot(residuals, fit=True, line='45',ax=ax[0, 1]) 
+ax[0, 1].set_title('Normal Q-Q') 
+  
+# Scale-Location Plot 
+sns.residplot(x=fitted_value, y=residuals, ax=ax[1, 0], lowess= True) 
+ax[1, 0].axhline(y=0, color='grey', linestyle='dashed') 
+ax[1, 0].set_xlabel('Fitted values') 
+ax[1, 0].set_ylabel('Sqrt(standardized residuals)') 
+ax[1, 0].set_title('Scale-Location Plot') 
+  
+# Residual vs Leverage Plot 
+sns.residplot(x=leverage, y=stand_resids, ax=ax[1, 1], lowess= True) 
+ax[1, 1].axhline(y=0, color='grey', linestyle='dashed')
+ax[1, 1].axvline(x= 2*p/n, color='red', linestyle='--')
+ax[1, 1].axhline(y= stats.t.ppf(0.05/(2*n), n-p-1), color='red', linestyle='--')
+ax[1, 1].axhline(y= -stats.t.ppf(0.05/(2*n), n-p-1), color='red', linestyle='--')
+ax[1, 1].set_xlabel('Leverage') 
+ax[1, 1].set_ylabel('Sqrt(standardized residuals)') 
+ax[1, 1].set_title('Residuals vs Leverage Plot') 
+  
+  
+plt.tight_layout() 
+plt.show() 
+```
+
+```{python}
+#| output: true
+
+norm_test = stats.shapiro(residuals)
+autocorr_errors = durbin_watson(residuals)
+
+print('Shapiro Statistic: ', round(norm_test[0], 3))
+print('Shapiro P-Value: ', round(norm_test[1], 3))
+print('\nDurbin Watson Statistic:', autocorr_errors)
+```
+
+Na @fig-residuos, nos gráficos `Resíduos versus valores ajustados` e `Gráfico escala-locação`, podemos observar que a validade da suposição de linearidade existe no modelo, assim como a validade da suposição de homocedasticidade das variâncias. Isso é evidenciado pelo padrão aleatório dos resíduos em torno de zero.
+
+O teste de *Durbin-Watson* para autocorrelação dos erros não mostra indícios de autocorrelação. Além disso, na figura `Normal Q-Q`, a verificação da suposição de normalidade dos erros é confirmada, e o teste de *Shapiro-Wilk* confirma esse resultado.
+
+No gráfico `Resíduos versus Alavancagem`, observamos a presença de pontos de alavancagem, mas não identificamos pontos inconsistentes. Portanto, não atribuiremos atenção excessiva a esses pontos.
+
+## Influência
+
+Em resumo, tanto as inspeções visuais quanto as análises estatísticas indicam que as observações não apresentam problemas significativos ou influências prejudiciais para a validade do nosso modelo.
+
+```{python}
+summ_df = influence.summary_frame().head()
+```
+
+
+```{python tabela-influencia}
+#| output: true
+#| label: tbl-influencia
+#| tbl-cap: "Sumário das Observações Influentes"
+
+summ_df
+
+```
+
+```{python}
+#| output: true
+#| echo: true
+
+# DFFitS
+summ_df[summ_df['dffits'] > 3*np.sqrt(p/(n-p))]['dffits']
+```
+
+```{python grafico-covratio}
+#| output: true
+#| label: fig-covratio
+#| fig-cap: "COVRATIO"
+#| fig-pos: "H"
+
+
+# COVRATION Threshold
+y = 1 - np.abs(influence.cov_ratio)
+nobs = len(modelo.model.endog)
+index = np.arange(nobs)
+threshold = (3*p)/n
+large_points = y > threshold
+labels = modelo._results.model.data.row_labels
+psize = 3 * np.ones(nobs)
+
+# Gráfico
+fig, ax = plt.subplots(figsize= (8, 6))
+ax.scatter(index, y)
+ax = utils.annotate_axes(np.where(large_points)[0], labels,
+                                 lzip(index, y),
+                                 lzip(-psize, psize), "large",
+                                 ax)
+font = {"fontsize": 12, "color": "black"}
+ax.set_ylabel('|1-COVRATIO|', **font)
+ax.set_xlabel("Observation", **font)
+ax.set_title('COVRATIO', **font)
+plt.show()
+```
+
+```{python grafico-hatcooks}
+#| output: true
+#| label: fig-hatcooks
+#| fig-cap: "Medidas de Influência Leverage e Cook's"
+#| layout-ncol: 2
+#| fig-subcap: 
+#|    - "Leverage"
+#|    - "Distância de Cooks"
+
+# Leverage, Cooks
+influence.plot_index(y_var="hat_diag", threshold= (3*p)/n)
+plt.show()
+influence.plot_index(y_var="cooks", threshold= stats.f.ppf(0.5,p, n-p))
+plt.show()
+```
+
+```{python grafico-dfbeta}
+#| output: true
+#| label: fig-dfbeta
+#| fig-cap: "Medidas de Influência DFBeta"
+#| layout-ncol: 3
+#| fig-subcap: 
+#|    - "DFBeta (sex)"
+#|    - "DFBeta (species)"
+#|    - "DFBeta (species)"
+#|    - "DFBeta (flipper_length_mm)"
+#|    - "DFBeta (bill_depth_mm)"
+#|    - "DFBeta (bill_length_mm)" 
+
+for i in range(1, p):
+  influence.plot_index(y_var="dfbeta", idx= i, threshold= 1)
+  plt.show()
+```
+
+
+## Regressão Parcial
+
+```{python grafico-parcial}
+#| output: true
+#| label: fig-parcial
+#| fig-cap: "Regressão Parcial"
+#| fig-pos: "H"
+#| layout: [[1, 1], [1]]
+#| fig-subcap: 
+#|    - "Bill Depth"
+#|    - "Bill Length"
+#|    - "Flipper Length"
+
+
+# Regressão Parcial 'flipper_length_mm'
+fig1 = plt.figure(figsize=(10, 8))
+g1 = sm.graphics.plot_regress_exog(modelo, 'flipper_length_mm', fig= fig1)
+plt.show()
+
+# Regressão Parcial 'bill_depth_mm'
+fig2 = plt.figure(figsize=(10, 8))
+g2 = sm.graphics.plot_regress_exog(modelo, 'bill_depth_mm', fig= fig2)
+plt.show()
+
+# Regressão Parcial 'bill_depth_mm'
+fig3 = plt.figure(figsize=(10, 8))
+g3 = sm.graphics.plot_regress_exog(modelo, 'bill_length_mm', fig= fig3)
+plt.show()
+```
+
+Na @fig-parcial podemos observar um padrão linear passando pela origem, mostrando que as variáveis explicativa estão linearmente relacionadas com a variável resposta. 
+
+## Conclusões
+
+```{python}
+#| output: true
+print(modelo.summary())
+```
+
+
+Com um $R^2$ $ajustado$ de aproximadamente $87.3\%$, o modelo demonstra um bom ajuste aos dados, indicando que grande parte da variação no peso corporal pode ser explicada pelas variáveis consideradas.
+
+Todas as variáveis são estatisticamente significativas, e de acordo com o VIF, não temos multicolinearidade. Além disso, a `F-statistic` sugere que o modelo como um todo é estatisticamente significativo.
+
+Observamos que pinguins do sexo masculino tendem a ter um peso corporal médio aproximadamente $389.89$ gramas maior do que pinguins do sexo feminino, mantendo outras variáveis constantes. Quanto à espécie, pinguins *Chinstrap* apresentam um peso médio cerca de $251.48$ gramas menor em comparação com a espécie de referência (*Adelie*, *Female*), enquanto pinguins *Gentoo* têm um peso médio aproximadamente $1014.63$ gramas maior.
+
+As variáveis físicas também desempenham um papel significativo. Para cada unidade adicional no comprimento da nadadeira, observamos um aumento médio de $15.95$ gramas no peso corporal, mantendo outras variáveis constantes. Similarmente, aumentos na profundidade e comprimento do bico estão associados a acréscimos médios de $67.22$ e $18.20$ gramas no peso corporal, respectivamente.
